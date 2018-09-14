@@ -29,7 +29,8 @@ public:
     Sodaq_UBlox_GPS();
 
     void init(int8_t enable_pin);
-    bool scan(bool leave_on = false, uint32_t timeout = 20000);
+    bool task(void);
+    bool hasFix() { return _hasFix; }
     String getDateTimeString();
     double getLat() { return _lat; }
     double getLon() { return _lon; }
@@ -54,9 +55,11 @@ public:
     void setDiag(Stream &stream) { _diagStream = &stream; }
     void setDiag(Stream *stream) { _diagStream = stream; }
 
-private:
     void on();
     void off();
+
+private:
+    
 
     // Read one byte
     uint8_t read();
@@ -94,8 +97,7 @@ private:
     // Minimum number of satellites to satisfy scan(). Zero means any number is OK.
     size_t      _minNumSatellites;
 
-    bool        _seenLatLon;
-    bool        _seenAlt;
+    bool        _hasFix;
     uint8_t     _numSatellites;
     double      _lat;
     double      _speed;

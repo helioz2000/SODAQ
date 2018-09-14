@@ -39,6 +39,8 @@ static const uint8_t UBlox_I2C_addr = 0x42;
 Sodaq_UBlox_GPS sodaq_gps;
 const char Sodaq_UBlox_GPS::_fieldSep = ',';
 
+int count = 0;
+
 static inline bool is_timedout(uint32_t from, uint32_t nr_ms) __attribute__((always_inline));
 static inline bool is_timedout(uint32_t from, uint32_t nr_ms)
 {
@@ -48,6 +50,7 @@ static inline bool is_timedout(uint32_t from, uint32_t nr_ms)
 Sodaq_UBlox_GPS::Sodaq_UBlox_GPS()
 {
     _enablePin = -1;
+    _hasFix = false;
 
     _diagStream = 0;
     _addr = UBlox_I2C_addr;
@@ -64,8 +67,7 @@ Sodaq_UBlox_GPS::Sodaq_UBlox_GPS()
 
 void Sodaq_UBlox_GPS::resetValues()
 {
-    _seenLatLon = false;
-    _seenAlt = false;
+    _hasFix = false;
     _numSatellites = 0;
     _lat = 0;
     _lon = 0;
@@ -87,55 +89,16 @@ void Sodaq_UBlox_GPS::init(int8_t enable_pin)
     pinMode(_enablePin, OUTPUT);
 }
 
-/*!
- * Read the UBlox device until a fix is seen, or until
- * a timeout has been reached.
+/*
+ * The main task handler for GPS
+ * Read GPS sentences and parses the data
  */
-bool Sodaq_UBlox_GPS::scan(bool leave_on, uint32_t timeout)
-{
+bool Sodaq_UBlox_GPS::task(void){
     bool retval = false;
-    uint32_t start = millis();
-    resetValues();
-
-    on();
-    delay(500);         // TODO Is this needed?
-
-    size_t fix_count = 0;
-    while (!is_timedout(start, timeout)) {
-        if (!readLine()) {
-            debugPrintLn(String("[scan] readLine FALSE --------------------------------------") );
-            // TODO Maybe quit?
-            continue;
-        }
+    if (readLine()) {
         parseLine(_inputBuffer);
-
-        // Which conditions are required to quit the scan?
-        if (_seenLatLon
-            && _seenTime
-            && _seenAlt
-            && (_minNumSatellites == 0 || _numSatellites >= _minNumSatellites)) {
-            ++fix_count;
-            if (fix_count >= _minNumOfLines) {
-                retval = true;
- //               break;
-            }
-        }
-    }
-
-    if (_numSatellites > 0) {
-        debugPrintLn(String("[scan] num sats = ") + _numSatellites);
-    }
-    if (_seenTime) {
-        debugPrintLn(String("[scan] datetime = ") + getDateTimeString());
-    }
-    if (_seenLatLon) {
-        debugPrintLn(String("[scan] lat = ") + String(_lat, 7));
-        debugPrintLn(String("[scan] lon = ") + String(_lon, 7));
-    }
-
-    if (!leave_on) {
-        off();
-    }
+        retval = true;       
+    } 
     return retval;
 }
 
@@ -221,7 +184,7 @@ bool Sodaq_UBlox_GPS::parseLine(const char * line)
  */
 bool Sodaq_UBlox_GPS::parseGPGGA(const String & line)
 {
-    debugPrintLn("parseGPGGA");
+    //debugPrintLn("parseGPGGA");
     debugPrintLn(String(">> ") + line);
     if (getField(line, 6) != "0") {
         _lat = convertDegMinToDecDeg(getField(line, 2));
@@ -232,12 +195,10 @@ bool Sodaq_UBlox_GPS::parseGPGGA(const String & line)
         if (getField(line, 5) == "W") {
             _lon = -_lon;
         }
-        _seenLatLon = true;
 
         _hdop = getField(line, 8).toFloat();
         if (getField(line, 10) == "M") {
             _alt = getField(line, 9).toFloat();
-            _seenAlt = true;
         }
     }
 
@@ -252,7 +213,7 @@ bool Sodaq_UBlox_GPS::parseGPGGA(const String & line)
 bool Sodaq_UBlox_GPS::parseGPGSA(const String & line)
 {
     // Not (yet) used
-    debugPrintLn("parseGPGSA");
+    //debugPrintLn("parseGPGSA");
     debugPrintLn(String(">> ") + line);
     return false;
 }
@@ -278,7 +239,7 @@ bool Sodaq_UBlox_GPS::parseGPGSA(const String & line)
  */
 bool Sodaq_UBlox_GPS::parseGPRMC(const String & line)
 {
-    debugPrintLn("parseGPRMC");
+    //debugPrintLn("parseGPRMC");
     debugPrintLn(String(">> ") + line);
 
     if (getField(line, 2) == "A" && getField(line, 12) != "N") {
@@ -290,7 +251,9 @@ bool Sodaq_UBlox_GPS::parseGPRMC(const String & line)
         if (getField(line, 6) == "W") {
             _lon = -_lon;
         }
-        _seenLatLon = true;
+        _hasFix = true;
+    } else {
+        _hasFix = false;
     }
 
     String time = getField(line, 1);
@@ -322,7 +285,7 @@ bool Sodaq_UBlox_GPS::parseGPRMC(const String & line)
  */
 bool Sodaq_UBlox_GPS::parseGPGSV(const String & line)
 {
-    debugPrintLn("parseGPGSV");
+    //debugPrintLn("parseGPGSV");
     debugPrintLn(String(">> ") + line);
 
     // We could/should only use msgNum == 1. However, all messages should have
@@ -339,7 +302,7 @@ bool Sodaq_UBlox_GPS::parseGPGSV(const String & line)
 bool Sodaq_UBlox_GPS::parseGPGLL(const String & line)
 {
     // Not (yet) used
-    debugPrintLn("parseGPGLL");
+    //debugPrintLn("parseGPGLL");
     debugPrintLn(String(">> ") + line);
     return false;
 }
@@ -351,7 +314,7 @@ bool Sodaq_UBlox_GPS::parseGPGLL(const String & line)
 bool Sodaq_UBlox_GPS::parseGPVTG(const String & line)
 {
     // Not (yet) used
-    debugPrintLn("parseGPVTG");
+    //debugPrintLn("parseGPVTG");
     debugPrintLn(String(">> ") + line);
     return false;
 }
@@ -556,7 +519,7 @@ bool Sodaq_UBlox_GPS::readLine(uint32_t timeout)
         if (c == '$') {
             break;
         }
-        if (c = 0xFF) ff_count++;       // this is a "read timeout"
+        if (c = 0xFF) return false; //ff_count++;       // this is a "read timeout"
     }
     
     if (ff_count > 0) {
